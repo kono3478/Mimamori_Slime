@@ -210,12 +210,61 @@
             <span>大きさ: <strong id="startSavedSize" class="text-rose-500">100%</strong> (Lv.<span id="startSavedLv">1</span>)</span>
         </div>
 
-        <!-- 開始ボタン -->
-        <div class="w-full flex flex-col gap-2">
-            <button id="btnStartCamera" class="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-sky-500 to-teal-400 active:scale-[0.98] text-white font-extrabold text-base shadow-lg shadow-sky-500/25 flex items-center justify-center gap-2 transition">
-                <i class="ph-fill ph-camera text-xl"></i>
-                <span id="btnStartCameraText">インカメラで見守りをはじめる</span>
+        <!-- カメラ許可＆プレビュー確認ステップボックス -->
+        <div id="cameraSetupBox" class="w-full bg-sky-50/95 border-2 border-sky-200 rounded-2xl p-3 flex flex-col items-center gap-2.5 shadow-inner">
+            <div class="flex items-center gap-3 w-full">
+                <!-- スタート前のカメラ確認プレビュー窓 -->
+                <div class="relative w-16 h-16 rounded-2xl overflow-hidden bg-slate-800 border-2 border-sky-300 flex-shrink-0 shadow-sm">
+                    <video id="setupPreviewVideo" autoplay playsinline webkit-playsinline muted class="w-full h-full object-cover transform -scale-x-100"></video>
+                    <div id="setupCameraIconOverlay" class="absolute inset-0 flex flex-col items-center justify-center text-sky-200 bg-slate-800/80">
+                        <i class="ph-fill ph-camera text-2xl"></i>
+                        <span class="text-[9px] font-bold mt-0.5">未接続</span>
+                    </div>
+                    <div id="setupFaceOkBadge" class="hidden absolute bottom-0 inset-x-0 bg-emerald-500/90 text-white text-[9px] font-extrabold py-0.5 text-center">
+                        カメラOK!
+                    </div>
+                </div>
+
+                <div class="text-left flex-1 min-w-0">
+                    <div id="setupStepBadge" class="inline-block text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-sky-200 text-sky-800 mb-0.5">
+                        ステップ 1
+                    </div>
+                    <div id="setupStatusTitle" class="text-xs font-extrabold text-slate-800 leading-snug">
+                        最初にカメラを許可してください
+                    </div>
+                    <div id="setupStatusDesc" class="text-[10px] text-slate-600 leading-tight mt-0.5">
+                        ボタンを押すとスマホの「カメラを許可しますか？」が表示されます。
+                    </div>
+                </div>
+            </div>
+
+            <!-- カメラエラー時の対処法ガイド（拒否・ブロックされた場合のみ表示） -->
+            <div id="cameraHelpBox" class="hidden w-full bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-left text-[10px] text-rose-800 leading-relaxed">
+                <div class="font-extrabold text-rose-600 flex items-center gap-1 mb-1">
+                    <i class="ph-fill ph-warning-circle text-sm"></i>
+                    <span>カメラが起動できない場合のチェック</span>
+                </div>
+                <ul class="list-disc pl-4 space-y-0.5 text-slate-700">
+                    <li>ブラウザのアドレスバー左端の「<i class="ph-bold ph-sliders-horizontal"></i>」や「🔒」アイコンから<strong>カメラの権限を「許可」</strong>にしてください。</li>
+                    <li>アプリ内ブラウザ等でブロックされる場合は、ChromeやSafariの別タブで開くか、下の「カメラを使わずに遊ぶ」をお選びください。</li>
+                </ul>
+            </div>
+
+            <!-- ステップ1：カメラ許可をリクエストするボタン -->
+            <button id="btnRequestCamera" class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-500 active:scale-[0.98] text-white font-extrabold text-sm shadow-md shadow-sky-500/20 flex items-center justify-center gap-2 transition">
+                <i class="ph-fill ph-video-camera text-lg"></i>
+                <span id="btnRequestCameraText">1. カメラへのアクセスを許可する</span>
             </button>
+
+            <!-- ステップ2：カメラ許可後に表示されるゲーム開始ボタン -->
+            <button id="btnStartWithCameraReady" class="hidden w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 active:scale-[0.98] text-white font-extrabold text-base shadow-lg shadow-emerald-500/30 flex items-center justify-center gap-2 transition animate-bounce">
+                <i class="ph-fill ph-play-circle text-xl"></i>
+                <span>2. カメラ準備OK！見守りをはじめる</span>
+            </button>
+        </div>
+
+        <!-- カメラを使わないモードの開始ボタン -->
+        <div class="w-full flex flex-col gap-1.5">
             <button id="btnStartNoCamera" class="w-full py-2.5 px-3 rounded-xl bg-slate-200/90 active:scale-[0.98] text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition">
                 <i class="ph-fill ph-hand-tap text-base"></i>
                 <span>カメラを使わずに遊ぶ（自動進行＆タップ）</span>
@@ -465,11 +514,87 @@
         // ==========================================
         let faceLandmarker = null;
         let webcamRunning = false;
+        let activeStream = null;
         const videoEl = document.getElementById("webcamVideo");
+        const setupPreviewVideo = document.getElementById("setupPreviewVideo");
 
         // オフスクリーンキャンバス（スマホのvideo要素を直接渡すと失敗する機種向けの安全策）
         const detectCanvas = document.createElement("canvas");
         const detectCtx = detectCanvas.getContext("2d", { willReadFrequently: true });
+
+        // スマホのユーザージェスチャー（タップイベント）直後に同期的に呼び出すカメラ要求プロセス
+        async function requestCameraPermissionFlow() {
+            const btnReq = document.getElementById("btnRequestCamera");
+            const btnReqText = document.getElementById("btnRequestCameraText");
+            const btnStartReady = document.getElementById("btnStartWithCameraReady");
+            const stepBadge = document.getElementById("setupStepBadge");
+            const statusTitle = document.getElementById("setupStatusTitle");
+            const statusDesc = document.getElementById("setupStatusDesc");
+            const helpBox = document.getElementById("cameraHelpBox");
+            const iconOverlay = document.getElementById("setupCameraIconOverlay");
+            const okBadge = document.getElementById("setupFaceOkBadge");
+
+            helpBox.classList.add("hidden");
+            btnReqText.textContent = "カメラの許可を確認中...";
+
+            // 重要：モバイルブラウザで権限ポップアップがブロックされないよう、
+            // 他のawait（音声初期化など）を挟まずに真っ先に getUserMedia を呼び出す
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    throw new Error("UNSUPPORTED_MEDIA_DEVICES");
+                }
+
+                let stream = null;
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: "user" },
+                        audio: false
+                    });
+                } catch (firstErr) {
+                    // facingMode指定に対応しない機種向けのフォールバック
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: true,
+                        audio: false
+                    });
+                }
+
+                activeStream = stream;
+
+                // スタート画面のプレビュー窓とゲーム本編のプレビュー窓の両方にストリームをセット
+                setupPreviewVideo.srcObject = stream;
+                videoEl.srcObject = stream;
+                await setupPreviewVideo.play().catch(() => {});
+                await videoEl.play().catch(() => {});
+
+                // プレビュー表示を「カメラOK」状態に更新
+                iconOverlay.classList.add("hidden");
+                okBadge.classList.remove("hidden");
+
+                stepBadge.textContent = "ステップ 2・準備完了";
+                stepBadge.className = "inline-block text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-emerald-200 text-emerald-800 mb-0.5";
+                statusTitle.textContent = "カメラが繋がりました！";
+                statusDesc.textContent = "左の窓にお顔が映っていれば準備バッチリです。";
+
+                // ステップ1ボタンを隠し、ステップ2の「見守りをはじめる」ボタンを表示
+                btnReq.classList.add("hidden");
+                btnStartReady.classList.remove("hidden");
+
+                // バックグラウンドで音声とAIモデルも準備しておく
+                initAudio();
+                setupFaceLandmarker().then((ready) => {
+                    webcamRunning = ready;
+                });
+
+            } catch (err) {
+                console.warn("Camera permission error:", err);
+                stepBadge.textContent = "カメラ未許可";
+                stepBadge.className = "inline-block text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-rose-200 text-rose-800 mb-0.5";
+                statusTitle.textContent = "カメラへのアクセスが許可されませんでした";
+                statusDesc.textContent = "もう一度試すか、下の「カメラを使わずに遊ぶ」で開始できます。";
+                btnReqText.textContent = "もう一度カメラの許可を試す";
+                helpBox.classList.remove("hidden");
+            }
+        }
 
         async function setupFaceLandmarker() {
             if (faceLandmarker) return true;
@@ -719,7 +844,8 @@
         }
 
         async function startGameSession(withCamera) {
-            await initAudio();
+            // 音声を初期化
+            initAudio();
             state.useCamera = withCamera;
             state.manualGazeOverride = !withCamera;
             state.timeRemaining = SESSION_DURATION;
@@ -734,9 +860,8 @@
             const camOffBadge = document.getElementById("cameraOffBadge");
             const gazeLabel = document.getElementById("btnGazeTestLabel");
             const subStatus = document.getElementById("cameraSubStatus");
-            const startBtnText = document.getElementById("btnStartCameraText");
 
-            // 先にHUDを表示してvideo要素が画面内でレンダリングされる状態にする（モバイルブラウザ対策）
+            // HUDを表示してゲーム画面へ切り替え
             document.getElementById("startModal").classList.add("hidden");
             document.getElementById("resultModal").classList.add("hidden");
             document.getElementById("hudTop").classList.remove("hidden");
@@ -744,51 +869,36 @@
 
             updateHudStats();
 
-            if (withCamera) {
-                if (startBtnText) startBtnText.textContent = "カメラを起動中...";
-                if (subStatus) subStatus.textContent = "カメラの許可を確認中...";
-
+            if (withCamera && activeStream) {
                 try {
-                    // 1. ユーザータップ直後にまずカメラストリームを取得する（スマホでの権限ブロック防止）
-                    if (!videoEl.srcObject) {
-                        let stream = null;
-                        try {
-                            stream = await navigator.mediaDevices.getUserMedia({
-                                video: { facingMode: "user" },
-                                audio: false
-                            });
-                        } catch (firstErr) {
-                            // facingMode指定が失敗する一部Android機種向けのフォールバック
-                            stream = await navigator.mediaDevices.getUserMedia({
-                                video: true,
-                                audio: false
-                            });
-                        }
-                        videoEl.srcObject = stream;
+                    if (videoEl.srcObject !== activeStream) {
+                        videoEl.srcObject = activeStream;
                     }
-
                     await videoEl.play();
                     camOffBadge.classList.add("hidden");
                     gazeLabel.textContent = "見守り判定: カメラ自動";
 
-                    // 2. カメラ映像が流れ始めてからAIモデルを初期化する
-                    const ready = await setupFaceLandmarker();
-                    webcamRunning = ready;
-                    if (!ready) {
-                        // AI初期化に失敗した場合は自動見守りONにフォールバック
+                    if (!faceLandmarker) {
+                        if (subStatus) subStatus.textContent = "AIセンサー読込中...";
+                        const ready = await setupFaceLandmarker();
+                        webcamRunning = ready;
+                    } else {
+                        webcamRunning = true;
+                    }
+
+                    if (!webcamRunning) {
                         state.manualGazeOverride = true;
                         gazeLabel.textContent = "見守り判定: 常時ON";
                     }
                     state.lastFaceSeenTime = performance.now() - 3500;
                 } catch (e) {
-                    console.warn("Webcam access fallback:", e);
+                    console.warn("Webcam play fallback:", e);
                     state.useCamera = false;
                     state.manualGazeOverride = true;
                     camOffBadge.classList.remove("hidden");
                     gazeLabel.textContent = "見守り判定: 常時ON";
                     if (subStatus) subStatus.textContent = "カメラ未許可のため自動見守り中";
                 }
-                if (startBtnText) startBtnText.textContent = "インカメラで見守りをはじめる";
             } else {
                 camOffBadge.classList.remove("hidden");
                 gazeLabel.textContent = "見守り判定: 常時ON";
@@ -1245,10 +1355,17 @@
         // ==========================================
         // 8. イベントリスナー（カメラ・スイッチ・タッチ対応）
         // ==========================================
-        document.getElementById("btnStartCamera").addEventListener("click", () => {
+        // ステップ1: カメラの許可を求めるボタン（タップ直後に他のawaitを挟まずgetUserMediaを呼ぶ）
+        document.getElementById("btnRequestCamera").addEventListener("click", () => {
+            requestCameraPermissionFlow();
+        });
+
+        // ステップ2: カメラ準備完了後にゲームを開始するボタン
+        document.getElementById("btnStartWithCameraReady").addEventListener("click", () => {
             startGameSession(true);
         });
 
+        // カメラを使わずに開始するボタン
         document.getElementById("btnStartNoCamera").addEventListener("click", () => {
             startGameSession(false);
         });
